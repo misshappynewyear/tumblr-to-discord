@@ -41,10 +41,22 @@ function loadState() {
 }
 
 function saveState(state) {
-  fs.writeFileSync(
-    STATE_FILE,
-    JSON.stringify(state, null, 2),
-    "utf8"
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf8");
+}
+
+function getStartOfTodayUtcTimestamp() {
+  const now = new Date();
+
+  return Math.floor(
+    Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      0,
+      0,
+      0,
+      0
+    ) / 1000
   );
 }
 
@@ -99,12 +111,17 @@ function dedupePosts(posts) {
 
     const existing = byId.get(post.id_string);
 
-    if ((post.timestamp || 0) > (existing.timestamp || 0)) {
+    if (Number(post.timestamp) > Number(existing.timestamp || 0)) {
       byId.set(post.id_string, post);
     }
   }
 
   return Array.from(byId.values());
+}
+
+function keepOnlyTodayUtc(posts) {
+  const startOfTodayUtc = getStartOfTodayUtcTimestamp();
+  return posts.filter((post) => Number(post.timestamp) >= startOfTodayUtc);
 }
 
 function keepOnlyNewerThan(posts, lastRunTimestamp) {
@@ -150,12 +167,14 @@ async function main() {
   }
 
   const dedupedPosts = dedupePosts(allPosts);
-  const newerPosts = keepOnlyNewerThan(dedupedPosts, state.last_run_timestamp);
+  const todayPosts = keepOnlyTodayUtc(dedupedPosts);
+  const newerPosts = keepOnlyNewerThan(todayPosts, state.last_run_timestamp);
   const unseenPosts = keepOnlyUnseen(newerPosts, seenPostIdsSet);
   const postsToSend = sortOldestFirst(unseenPosts);
 
   console.log(`Total fetched: ${allPosts.length}`);
   console.log(`Deduped: ${dedupedPosts.length}`);
+  console.log(`Today UTC: ${todayPosts.length}`);
   console.log(`Newer than last run: ${newerPosts.length}`);
   console.log(`Unseen: ${unseenPosts.length}`);
 
@@ -165,7 +184,8 @@ async function main() {
     console.log("First run detected. Initializing state without posting.");
 
     const newSeenIds = new Set(seenPostIdsSet);
-    for (const post of dedupedPosts) {
+
+    for (const post of todayPosts) {
       newSeenIds.add(post.id_string);
     }
 
@@ -174,7 +194,7 @@ async function main() {
       seen_post_ids: Array.from(newSeenIds)
     });
 
-    console.log(`Initialized state with ${newSeenIds.size} seen posts.`);
+    console.log(`Initialized state with ${newSeenIds.size} seen posts from today UTC.`);
     return;
   }
 
