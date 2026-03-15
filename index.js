@@ -5,39 +5,102 @@ const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 
 const TAGS = (process.env.TAGS || "")
   .split(",")
-  .map(tag => tag.trim())
+  .map((tag) => tag.trim())
   .filter(Boolean);
 
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
 const STATE_FILE = "state.json";
 
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeState(parsed) {
+  return {
+    last_timestamp: Number(parsed?.last_timestamp || 0),
+    last_id: String(parsed?.last_id || "0")
+  };
 }
 
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
     return {
-      last_run_timestamp: 0,
-      seen_post_ids: []
+      last_timestamp: 0,
+      last_id: "0"
     };
   }
 
-  const raw = fs.readFileSync(STATE_FILE, "utf8");
-  const parsed = JSON.parse(raw);
-
-  return {
-    last_run_timestamp: Number(parsed.last_run_timestamp || 0),
-    seen_post_ids: parsed.seen_post_ids || []
-  };
+  try {
+    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return normalizeState(parsed);
+  } catch (error) {
+    console.warn("Could not read state.json, using default state.", error);
+    return {
+      last_timestamp: 0,
+      last_id: "0"
+    };
+  }
 }
 
 function saveState(state) {
   fs.writeFileSync(
     STATE_FILE,
-    JSON.stringify(state, null, 2),
+    JSON.stringify(
+      {
+        last_timestamp: Number(state.last_timestamp || 0),
+        last_id: String(state.last_id || "0")
+      },
+      null,
+      2
+    ),
     "utf8"
   );
+}
+
+function comparePostOrder(a, b) {
+  const aTimestamp = Number(a.timestamp || 0);
+  const bTimestamp = Number(b.timestamp || 0);
+
+  if (aTimestamp !== bTimestamp) {
+    return aTimestamp - bTimestamp;
+  }
+
+  const aId = BigInt(a.id_string);
+  const bId = BigInt(b.id_string);
+
+  if (aId < bId) return -1;
+  if (aId > bId) return 1;
+  return 0;
+}
+
+function isAfterState(post, state) {
+  const postTimestamp = Number(post.timestamp || 0);
+  const stateTimestamp = Number(state.last_timestamp || 0);
+
+  if (postTimestamp > stateTimestamp) {
+    return true;
+  }
+
+  if (postTimestamp < stateTimestamp) {
+    return false;
+  }
+
+  return BigInt(post.id_string) > BigInt(state.last_id || "0");
+}
+
+function dedupePosts(posts) {
+  const byId = new Map();
+
+  for (const post of posts) {
+    if (!post?.id_string || !post?.post_url || !post?.timestamp) {
+      continue;
+    }
+
+    byId.set(post.id_string, post);
+  }
+
+  return Array.from(byId.values());
 }
 
 async function fetchTagPosts(tag) {
@@ -51,11 +114,16 @@ async function fetchTagPosts(tag) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Tumblr API error for tag "${tag}": ${response.status} ${text}`);
+    throw new Error(`Tumblr API error for tag "${tag}": ${response.status} - ${text}`);
   }
 
   const data = await response.json();
-  return data.response || [];
+
+  if (!data?.response || !Array.isArray(data.response)) {
+    return [];
+  }
+
+  return data.response;
 }
 
 async function sendToDiscord(post) {
@@ -71,121 +139,100 @@ async function sendToDiscord(post) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Discord webhook error: ${response.status} ${text}`);
+    throw new Error(`Discord webhook error: ${response.status} - ${text}`);
   }
-}
-
-function dedupePosts(posts) {
-  const map = new Map();
-
-  for (const post of posts) {
-    if (!post?.id_string || !post?.timestamp) continue;
-
-    map.set(post.id_string, post);
-  }
-
-  return Array.from(map.values());
-}
-
-function filterNewPosts(posts, lastRunTimestamp, seenIds) {
-  const seenSet = new Set(seenIds);
-
-  return posts.filter(post =>
-    Number(post.timestamp) > lastRunTimestamp &&
-    !seenSet.has(post.id_string)
-  );
-}
-
-function sortOldestFirst(posts) {
-  return posts.sort((a, b) => a.timestamp - b.timestamp);
 }
 
 async function main() {
+  if (!API_KEY) {
+    throw new Error("Missing TUMBLR_API_KEY");
+  }
 
-  if (!API_KEY) throw new Error("Missing TUMBLR_API_KEY");
-  if (!DISCORD_WEBHOOK_URL) throw new Error("Missing DISCORD_WEBHOOK_URL");
-  if (TAGS.length === 0) throw new Error("Missing TAGS");
+  if (!DISCORD_WEBHOOK_URL) {
+    throw new Error("Missing DISCORD_WEBHOOK_URL");
+  }
+
+  if (TAGS.length === 0) {
+    throw new Error("Missing TAGS");
+  }
 
   const state = loadState();
-  const nowTimestamp = Math.floor(Date.now() / 1000);
 
   console.log("Starting run");
   console.log("Tags:", TAGS);
-  console.log("Last run:", state.last_run_timestamp);
+  console.log("Last state:", state);
 
   let allPosts = [];
 
   for (const tag of TAGS) {
-
     console.log(`Fetching tag: ${tag}`);
-
     const posts = await fetchTagPosts(tag);
-
     console.log(`Fetched ${posts.length}`);
-
     allPosts = allPosts.concat(posts);
   }
 
-  const deduped = dedupePosts(allPosts);
-
-  const newPosts = filterNewPosts(
-    deduped,
-    state.last_run_timestamp,
-    state.seen_post_ids
-  );
-
-  const postsToSend = sortOldestFirst(newPosts);
+  const dedupedPosts = dedupePosts(allPosts);
+  const sortedPosts = dedupedPosts.sort(comparePostOrder);
+  const postsToSend = sortedPosts.filter((post) => isAfterState(post, state));
 
   console.log("Total fetched:", allPosts.length);
-  console.log("Deduped:", deduped.length);
+  console.log("Deduped:", dedupedPosts.length);
   console.log("To send:", postsToSend.length);
 
-  const isFirstRun = state.last_run_timestamp === 0;
+  const isFirstRun = state.last_timestamp === 0 && state.last_id === "0";
 
   if (isFirstRun) {
+    console.log("First run: initializing state without posting.");
 
-    console.log("First run: initializing state");
+    const lastPost = sortedPosts.at(-1);
 
-    const seen = new Set(state.seen_post_ids);
-
-    for (const p of deduped) {
-      seen.add(p.id_string);
+    if (!lastPost) {
+      console.log("No posts found. Saving empty initial state.");
+      saveState({
+        last_timestamp: 0,
+        last_id: "0"
+      });
+      return;
     }
 
     saveState({
-      last_run_timestamp: nowTimestamp,
-      seen_post_ids: Array.from(seen)
+      last_timestamp: Number(lastPost.timestamp),
+      last_id: String(lastPost.id_string)
     });
 
+    console.log(
+      `Initialized state with last_timestamp=${lastPost.timestamp}, last_id=${lastPost.id_string}`
+    );
     return;
   }
 
-  let sent = 0;
+  let sentCount = 0;
+  let latestProcessedPost = null;
 
   for (const post of postsToSend) {
-
-    console.log("Sending:", post.post_url);
-
+    console.log(`Sending: ${post.post_url}`);
     await sendToDiscord(post);
-
-    state.seen_post_ids.push(post.id_string);
-
-    sent++;
+    sentCount++;
+    latestProcessedPost = post;
 
     if (DELAY_MS > 0) {
       await sleep(DELAY_MS);
     }
   }
 
-  saveState({
-    last_run_timestamp: nowTimestamp,
-    seen_post_ids: state.seen_post_ids
-  });
+  if (latestProcessedPost) {
+    saveState({
+      last_timestamp: Number(latestProcessedPost.timestamp),
+      last_id: String(latestProcessedPost.id_string)
+    });
+  } else {
+    console.log("No new posts. State unchanged.");
+  }
 
-  console.log("Done. Sent:", sent);
+  console.log(`Done. Sent: ${sentCount}`);
 }
 
-main().catch(err => {
-  console.error(err);
+main().catch((error) => {
+  console.error(error);
   process.exit(1);
 });
