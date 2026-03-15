@@ -10,7 +10,7 @@ on:
         description: "Delay between Discord posts in milliseconds"
         required: false
   schedule:
-  - cron: "0 */6 * * *"
+   - cron: "0 */3 * * *"
 
 jobs:
   run-bot:
