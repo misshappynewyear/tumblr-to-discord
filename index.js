@@ -1,4 +1,5 @@
 import fs from "fs";
+import fetch from "node-fetch";
 
 const API_KEY = process.env.TUMBLR_API_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
@@ -219,6 +220,17 @@ async function main() {
 
   const seenIds = buildSeenIdsSet(state, cutoffSeconds);
 
+  console.log("Seen IDs count:", seenIds.size);
+
+  if (dedupedPosts.length > 0) {
+    const newestSeen = [...dedupedPosts].sort(comparePostOrderAsc).at(-1);
+    console.log("Newest Tumblr post returned this run:", {
+      id: newestSeen.id_string,
+      timestamp: newestSeen.timestamp,
+      url: newestSeen.post_url
+    });
+  }
+
   const postsToSend = freshPosts.filter(
     (post) => !seenIds.has(String(post.id_string))
   );
@@ -231,7 +243,12 @@ async function main() {
   let sentCount = 0;
 
   for (const post of postsToSend) {
-    console.log(`Sending: ${post.post_url}`);
+    console.log("About to send post:", {
+      id: post.id_string,
+      timestamp: post.timestamp,
+      url: post.post_url
+    });
+
     await sendToDiscord(post);
     sentCount++;
 
