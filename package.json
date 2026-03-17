@@ -1,14 +1,8 @@
 {
   "name": "tumblr-to-discord",
   "version": "1.0.0",
-  "description": "Tumblr tag watcher that posts new posts to Discord",
   "type": "module",
-  "main": "index.js",
   "scripts": {
     "start": "node index.js"
-  },
-  "dependencies": {
-    "node-fetch": "^3.3.2",
-    "playwright": "^1.45.0"
   }
 }
