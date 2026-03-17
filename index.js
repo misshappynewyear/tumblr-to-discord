@@ -11,9 +11,11 @@ const TAGS = (process.env.TAGS || "")
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
 const STATE_FILE = "state.json";
 
-// nuevo: activar prueba web sin romper el flujo actual
-const ENABLE_WEB_CAPTURE = String(process.env.ENABLE_WEB_CAPTURE || "false").toLowerCase() === "true";
-const WEB_CAPTURE_TIMEOUT_MS = Number(process.env.WEB_CAPTURE_TIMEOUT_MS || 30000);
+const ENABLE_WEB_CAPTURE =
+  String(process.env.ENABLE_WEB_CAPTURE || "false").toLowerCase() === "true";
+const WEB_CAPTURE_TIMEOUT_MS = Number(
+  process.env.WEB_CAPTURE_TIMEOUT_MS || 30000
+);
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,7 +24,7 @@ function sleep(ms) {
 function normalizeState(parsed) {
   return {
     last_timestamp: Number(parsed?.last_timestamp || 0),
-    last_id: String(parsed?.last_id || "0")
+    last_id: String(parsed?.last_id || "0"),
   };
 }
 
@@ -47,7 +49,7 @@ function saveState(state) {
     JSON.stringify(
       {
         last_timestamp: Number(state.last_timestamp || 0),
-        last_id: String(state.last_id || "0")
+        last_id: String(state.last_id || "0"),
       },
       null,
       2
@@ -112,7 +114,9 @@ async function fetchTagPosts(tag) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Tumblr API error for tag "${tag}": ${response.status} - ${text}`);
+    throw new Error(
+      `Tumblr API error for tag "${tag}": ${response.status} - ${text}`
+    );
   }
 
   const data = await response.json();
@@ -128,11 +132,11 @@ async function sendToDiscord(post) {
   const response = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      content: post.post_url
-    })
+      content: post.post_url,
+    }),
   });
 
   if (!response.ok) {
@@ -146,89 +150,47 @@ async function sendToDiscord(post) {
    ========================= */
 
 function findTimelineItems(payload) {
-  if (Array.isArray(payload)) return payload;
+  const elements = payload?.response?.timeline?.elements;
 
-  if (Array.isArray(payload?.response?.timeline?.elements)) {
-    return payload.response.timeline.elements;
+  if (!Array.isArray(elements)) {
+    return [];
   }
 
-  if (Array.isArray(payload?.response?.timeline?.items)) {
-    return payload.response.timeline.items;
+  const posts = [];
+
+  for (const element of elements) {
+    const resources = Array.isArray(element?.resources) ? element.resources : [];
+
+    for (const resource of resources) {
+      const resourcePosts = Array.isArray(resource?.posts)
+        ? resource.posts
+        : [];
+      posts.push(...resourcePosts);
+    }
   }
 
-  if (Array.isArray(payload?.response?.items)) {
-    return payload.response.items;
+  return posts;
+}
+
+function normalizeWebTags(item) {
+  if (Array.isArray(item?.tags) && item.tags.length > 0) {
+    return item.tags.filter(Boolean);
   }
 
-  if (Array.isArray(payload?.response)) {
-    return payload.response;
-  }
-
-  if (Array.isArray(payload?.timeline?.elements)) {
-    return payload.timeline.elements;
-  }
-
-  if (Array.isArray(payload?.timeline?.items)) {
-    return payload.timeline.items;
+  if (Array.isArray(item?.tagsV2) && item.tagsV2.length > 0) {
+    return item.tagsV2
+      .map((tag) => tag?.name ?? null)
+      .filter(Boolean);
   }
 
   return [];
 }
 
-function normalizeWebTags(item) {
-  const raw =
-    item?.tags ??
-    item?.post?.tags ??
-    item?.content?.tags ??
-    item?.trail?.flatMap((entry) => entry?.tags || []) ??
-    [];
-
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  return raw
-    .map((tag) => {
-      if (typeof tag === "string") return tag;
-      if (tag && typeof tag === "object") {
-        return tag.name ?? tag.tag ?? null;
-      }
-      return null;
-    })
-    .filter(Boolean);
-}
-
 function normalizeWebPost(item) {
-  const id =
-    item?.id ??
-    item?.id_string ??
-    item?.post?.id ??
-    item?.post?.id_string ??
-    item?.post_id ??
-    null;
-
-  const timestamp =
-    item?.timestamp ??
-    item?.post?.timestamp ??
-    item?.published_timestamp ??
-    item?.date ??
-    null;
-
-  const url =
-    item?.post_url ??
-    item?.url ??
-    item?.post?.post_url ??
-    item?.post?.url ??
-    item?.share_url ??
-    null;
-
-  const blog_name =
-    item?.blog_name ??
-    item?.blog?.name ??
-    item?.post?.blog_name ??
-    item?.post?.blog?.name ??
-    item?.account?.name ??
-    null;
+  const id = item?.idString ?? item?.id ?? null;
+  const timestamp = item?.timestamp ?? null;
+  const url = item?.postUrl ?? null;
+  const blog_name = item?.blogName ?? item?.blog?.name ?? null;
 
   if (!id || !timestamp || !url || !blog_name) {
     return null;
@@ -239,7 +201,7 @@ function normalizeWebPost(item) {
     timestamp: Number(timestamp),
     url,
     blog_name,
-    tags: normalizeWebTags(item)
+    tags: normalizeWebTags(item),
   };
 }
 
@@ -277,11 +239,13 @@ async function captureWebTimelineForTag(tag) {
 
   const context = await browser.newContext({
     userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
   });
 
   const page = await context.newPage();
-  const searchUrl = `https://www.tumblr.com/search/${encodeURIComponent(tag)}/recent`;
+  const searchUrl = `https://www.tumblr.com/search/${encodeURIComponent(
+    tag
+  )}/recent`;
 
   try {
     const responsePromise = page.waitForResponse(
@@ -294,7 +258,7 @@ async function captureWebTimelineForTag(tag) {
 
     await page.goto(searchUrl, {
       waitUntil: "domcontentloaded",
-      timeout: WEB_CAPTURE_TIMEOUT_MS
+      timeout: WEB_CAPTURE_TIMEOUT_MS,
     });
 
     const response = await responsePromise;
@@ -304,6 +268,9 @@ async function captureWebTimelineForTag(tag) {
     const normalized = items.map(normalizeWebPost).filter(Boolean);
     const deduped = dedupeWebPosts(normalized);
     const sorted = sortWebPosts(deduped);
+
+    console.log(`Web raw posts for "${tag}": ${items.length}`);
+    console.log(`Web normalized posts for "${tag}": ${sorted.length}`);
 
     return sorted;
   } finally {
@@ -346,7 +313,6 @@ async function main() {
   console.log("Tags:", TAGS);
   console.log("Last state:", state);
 
-  // nuevo: prueba extra, no afecta el flujo viejo
   if (ENABLE_WEB_CAPTURE) {
     await logWebCaptureForTags(TAGS);
   }
@@ -382,7 +348,7 @@ async function main() {
 
     saveState({
       last_timestamp: Number(lastPost.timestamp),
-      last_id: String(lastPost.id_string)
+      last_id: String(lastPost.id_string),
     });
 
     console.log(
@@ -408,7 +374,7 @@ async function main() {
   if (latestProcessedPost) {
     saveState({
       last_timestamp: Number(latestProcessedPost.timestamp),
-      last_id: String(latestProcessedPost.id_string)
+      last_id: String(latestProcessedPost.id_string),
     });
   } else {
     console.log("No new posts. State unchanged.");
