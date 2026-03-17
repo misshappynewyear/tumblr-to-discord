@@ -1,8 +1,9 @@
-{
-  "name": "tumblr-to-discord",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node index.js"
+[
+  {
+    "id": "811185206976544768",
+    "timestamp": 1773606497,
+    "url": "https://...",
+    "blog_name": "queen-of-andor",
+    "tags": ["zonami", "one piece"]
   }
-}
+]
