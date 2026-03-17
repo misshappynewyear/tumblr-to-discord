@@ -10,7 +10,7 @@ on:
         description: "Delay between Discord posts in milliseconds"
         required: false
   schedule:
-   - cron: "0 */3 * * *"
+    - cron: "0 */3 * * *"
 
 jobs:
   run-bot:
@@ -27,6 +27,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
 
       - name: Run bot
         env:
@@ -34,6 +41,7 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TAGS: ${{ github.event.inputs.tags || vars.TAGS }}
           DELAY_MS: ${{ github.event.inputs.delay_ms || vars.DELAY_MS || '2000' }}
+          ENABLE_WEB_CAPTURE: "true"
         run: node index.js
 
       - name: Commit updated state
