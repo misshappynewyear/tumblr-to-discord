@@ -2,32 +2,40 @@ import fs from "fs";
 
 const API_KEY = process.env.TUMBLR_API_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
-
 const TAGS = (process.env.TAGS || "")
   .split(",")
   .map((tag) => tag.trim())
   .filter(Boolean);
 
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
+const FRESHNESS_HOURS = Number(process.env.FRESHNESS_HOURS || 24);
+const RECENT_IDS_LIMIT = Number(process.env.RECENT_IDS_LIMIT || 200);
 const STATE_FILE = "state.json";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getFreshnessCutoffSeconds() {
+  return Math.floor(Date.now() / 1000) - FRESHNESS_HOURS * 60 * 60;
+}
+
 function normalizeState(parsed) {
-  return {
-    last_timestamp: Number(parsed?.last_timestamp || 0),
-    last_id: String(parsed?.last_id || "0")
-  };
+  const recent_posts = Array.isArray(parsed?.recent_posts)
+    ? parsed.recent_posts
+        .map((item) => ({
+          id: String(item?.id || ""),
+          timestamp: Number(item?.timestamp || 0),
+        }))
+        .filter((item) => item.id && item.timestamp > 0)
+    : [];
+
+  return { recent_posts };
 }
 
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
-    return {
-      last_timestamp: 0,
-      last_id: "0"
-    };
+    return { recent_posts: [] };
   }
 
   try {
@@ -36,10 +44,7 @@ function loadState() {
     return normalizeState(parsed);
   } catch (error) {
     console.warn("Could not read state.json, using default state.", error);
-    return {
-      last_timestamp: 0,
-      last_id: "0"
-    };
+    return { recent_posts: [] };
   }
 }
 
@@ -48,8 +53,7 @@ function saveState(state) {
     STATE_FILE,
     JSON.stringify(
       {
-        last_timestamp: Number(state.last_timestamp || 0),
-        last_id: String(state.last_id || "0")
+        recent_posts: state.recent_posts,
       },
       null,
       2
@@ -58,7 +62,7 @@ function saveState(state) {
   );
 }
 
-function comparePostOrder(a, b) {
+function comparePostOrderAsc(a, b) {
   const aTimestamp = Number(a.timestamp || 0);
   const bTimestamp = Number(b.timestamp || 0);
 
@@ -66,27 +70,12 @@ function comparePostOrder(a, b) {
     return aTimestamp - bTimestamp;
   }
 
-  const aId = BigInt(a.id_string);
-  const bId = BigInt(b.id_string);
+  const aId = BigInt(String(a.id_string));
+  const bId = BigInt(String(b.id_string));
 
   if (aId < bId) return -1;
   if (aId > bId) return 1;
   return 0;
-}
-
-function isAfterState(post, state) {
-  const postTimestamp = Number(post.timestamp || 0);
-  const stateTimestamp = Number(state.last_timestamp || 0);
-
-  if (postTimestamp > stateTimestamp) {
-    return true;
-  }
-
-  if (postTimestamp < stateTimestamp) {
-    return false;
-  }
-
-  return BigInt(post.id_string) > BigInt(state.last_id || "0");
 }
 
 function dedupePosts(posts) {
@@ -97,10 +86,14 @@ function dedupePosts(posts) {
       continue;
     }
 
-    byId.set(post.id_string, post);
+    byId.set(String(post.id_string), post);
   }
 
   return Array.from(byId.values());
+}
+
+function isFreshPost(post, cutoffSeconds) {
+  return Number(post.timestamp || 0) >= cutoffSeconds;
 }
 
 async function fetchTagPosts(tag) {
@@ -130,17 +123,62 @@ async function sendToDiscord(post) {
   const response = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      content: post.post_url
-    })
+      content: post.post_url,
+    }),
   });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Discord webhook error: ${response.status} - ${text}`);
   }
+}
+
+function buildSeenIdsSet(state, cutoffSeconds) {
+  const freshSaved = state.recent_posts.filter(
+    (item) => Number(item.timestamp || 0) >= cutoffSeconds
+  );
+
+  return new Set(freshSaved.map((item) => String(item.id)));
+}
+
+function buildNextState(savedState, fetchedFreshPosts, cutoffSeconds) {
+  const merged = new Map();
+
+  for (const item of savedState.recent_posts) {
+    if (Number(item.timestamp || 0) >= cutoffSeconds && item.id) {
+      merged.set(String(item.id), {
+        id: String(item.id),
+        timestamp: Number(item.timestamp),
+      });
+    }
+  }
+
+  for (const post of fetchedFreshPosts) {
+    merged.set(String(post.id_string), {
+      id: String(post.id_string),
+      timestamp: Number(post.timestamp),
+    });
+  }
+
+  const recent_posts = Array.from(merged.values())
+    .sort((a, b) => {
+      if (b.timestamp !== a.timestamp) {
+        return b.timestamp - a.timestamp;
+      }
+
+      const aId = BigInt(a.id);
+      const bId = BigInt(b.id);
+
+      if (bId > aId) return 1;
+      if (bId < aId) return -1;
+      return 0;
+    })
+    .slice(0, RECENT_IDS_LIMIT);
+
+  return { recent_posts };
 }
 
 async function main() {
@@ -157,10 +195,13 @@ async function main() {
   }
 
   const state = loadState();
+  const cutoffSeconds = getFreshnessCutoffSeconds();
 
   console.log("Starting run");
   console.log("Tags:", TAGS);
-  console.log("Last state:", state);
+  console.log("Freshness hours:", FRESHNESS_HOURS);
+  console.log("Freshness cutoff:", cutoffSeconds);
+  console.log("Saved recent posts:", state.recent_posts.length);
 
   let allPosts = [];
 
@@ -172,63 +213,37 @@ async function main() {
   }
 
   const dedupedPosts = dedupePosts(allPosts);
-  const sortedPosts = dedupedPosts.sort(comparePostOrder);
-  const postsToSend = sortedPosts.filter((post) => isAfterState(post, state));
+  const freshPosts = dedupedPosts
+    .filter((post) => isFreshPost(post, cutoffSeconds))
+    .sort(comparePostOrderAsc);
+
+  const seenIds = buildSeenIdsSet(state, cutoffSeconds);
+
+  const postsToSend = freshPosts.filter(
+    (post) => !seenIds.has(String(post.id_string))
+  );
 
   console.log("Total fetched:", allPosts.length);
   console.log("Deduped:", dedupedPosts.length);
+  console.log("Fresh posts:", freshPosts.length);
   console.log("To send:", postsToSend.length);
 
-  const isFirstRun = state.last_timestamp === 0 && state.last_id === "0";
-
-  if (isFirstRun) {
-    console.log("First run: initializing state without posting.");
-
-    const lastPost = sortedPosts.at(-1);
-
-    if (!lastPost) {
-      console.log("No posts found. Saving empty initial state.");
-      saveState({
-        last_timestamp: 0,
-        last_id: "0"
-      });
-      return;
-    }
-
-    saveState({
-      last_timestamp: Number(lastPost.timestamp),
-      last_id: String(lastPost.id_string)
-    });
-
-    console.log(
-      `Initialized state with last_timestamp=${lastPost.timestamp}, last_id=${lastPost.id_string}`
-    );
-    return;
-  }
-
   let sentCount = 0;
-  let latestProcessedPost = null;
 
   for (const post of postsToSend) {
     console.log(`Sending: ${post.post_url}`);
     await sendToDiscord(post);
     sentCount++;
-    latestProcessedPost = post;
 
     if (DELAY_MS > 0) {
       await sleep(DELAY_MS);
     }
   }
 
-  if (latestProcessedPost) {
-    saveState({
-      last_timestamp: Number(latestProcessedPost.timestamp),
-      last_id: String(latestProcessedPost.id_string)
-    });
-  } else {
-    console.log("No new posts. State unchanged.");
-  }
+  const nextState = buildNextState(state, freshPosts, cutoffSeconds);
+  saveState(nextState);
 
+  console.log("Saved recent posts:", nextState.recent_posts.length);
   console.log(`Done. Sent: ${sentCount}`);
 }
 
