@@ -1,8 +1,8 @@
 import fs from "fs";
-import { chromium } from "playwright";
 
 const API_KEY = process.env.TUMBLR_API_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+
 const TAGS = (process.env.TAGS || "")
   .split(",")
   .map((tag) => tag.trim())
@@ -11,12 +11,6 @@ const TAGS = (process.env.TAGS || "")
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
 const STATE_FILE = "state.json";
 
-const ENABLE_WEB_CAPTURE =
-  String(process.env.ENABLE_WEB_CAPTURE || "false").toLowerCase() === "true";
-const WEB_CAPTURE_TIMEOUT_MS = Number(
-  process.env.WEB_CAPTURE_TIMEOUT_MS || 30000
-);
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -24,13 +18,16 @@ function sleep(ms) {
 function normalizeState(parsed) {
   return {
     last_timestamp: Number(parsed?.last_timestamp || 0),
-    last_id: String(parsed?.last_id || "0"),
+    last_id: String(parsed?.last_id || "0")
   };
 }
 
 function loadState() {
   if (!fs.existsSync(STATE_FILE)) {
-    return { last_timestamp: 0, last_id: "0" };
+    return {
+      last_timestamp: 0,
+      last_id: "0"
+    };
   }
 
   try {
@@ -39,7 +36,10 @@ function loadState() {
     return normalizeState(parsed);
   } catch (error) {
     console.warn("Could not read state.json, using default state.", error);
-    return { last_timestamp: 0, last_id: "0" };
+    return {
+      last_timestamp: 0,
+      last_id: "0"
+    };
   }
 }
 
@@ -49,7 +49,7 @@ function saveState(state) {
     JSON.stringify(
       {
         last_timestamp: Number(state.last_timestamp || 0),
-        last_id: String(state.last_id || "0"),
+        last_id: String(state.last_id || "0")
       },
       null,
       2
@@ -114,9 +114,7 @@ async function fetchTagPosts(tag) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(
-      `Tumblr API error for tag "${tag}": ${response.status} - ${text}`
-    );
+    throw new Error(`Tumblr API error for tag "${tag}": ${response.status} - ${text}`);
   }
 
   const data = await response.json();
@@ -132,165 +130,16 @@ async function sendToDiscord(post) {
   const response = await fetch(DISCORD_WEBHOOK_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      content: post.post_url,
-    }),
+      content: post.post_url
+    })
   });
 
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Discord webhook error: ${response.status} - ${text}`);
-  }
-}
-
-/* =========================
-   NUEVO: captura web Tumblr
-   ========================= */
-
-function findTimelineItems(payload) {
-  const elements = payload?.response?.timeline?.elements;
-
-  if (!Array.isArray(elements)) {
-    return [];
-  }
-
-  const posts = [];
-
-  for (const element of elements) {
-    const resources = Array.isArray(element?.resources) ? element.resources : [];
-
-    for (const resource of resources) {
-      const resourcePosts = Array.isArray(resource?.posts)
-        ? resource.posts
-        : [];
-      posts.push(...resourcePosts);
-    }
-  }
-
-  return posts;
-}
-
-function normalizeWebTags(item) {
-  if (Array.isArray(item?.tags) && item.tags.length > 0) {
-    return item.tags.filter(Boolean);
-  }
-
-  if (Array.isArray(item?.tagsV2) && item.tagsV2.length > 0) {
-    return item.tagsV2
-      .map((tag) => tag?.name ?? null)
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-function normalizeWebPost(item) {
-  const id = item?.idString ?? item?.id ?? null;
-  const timestamp = item?.timestamp ?? null;
-  const url = item?.postUrl ?? null;
-  const blog_name = item?.blogName ?? item?.blog?.name ?? null;
-
-  if (!id || !timestamp || !url || !blog_name) {
-    return null;
-  }
-
-  return {
-    id: String(id),
-    timestamp: Number(timestamp),
-    url,
-    blog_name,
-    tags: normalizeWebTags(item),
-  };
-}
-
-function sortWebPosts(posts) {
-  return posts.sort((a, b) => {
-    if (b.timestamp !== a.timestamp) {
-      return b.timestamp - a.timestamp;
-    }
-
-    const aId = BigInt(a.id);
-    const bId = BigInt(b.id);
-
-    if (bId > aId) return 1;
-    if (bId < aId) return -1;
-    return 0;
-  });
-}
-
-function dedupeWebPosts(posts) {
-  const byId = new Map();
-
-  for (const post of posts) {
-    if (!post?.id || !post?.url || !post?.timestamp) {
-      continue;
-    }
-
-    byId.set(post.id, post);
-  }
-
-  return Array.from(byId.values());
-}
-
-async function captureWebTimelineForTag(tag) {
-  const browser = await chromium.launch({ headless: true });
-
-  const context = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-  });
-
-  const page = await context.newPage();
-  const searchUrl = `https://www.tumblr.com/search/${encodeURIComponent(
-    tag
-  )}/recent`;
-
-  try {
-    const responsePromise = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" &&
-        response.url().includes("/api/v2/timeline/search") &&
-        response.url().includes(`query=${encodeURIComponent(tag)}`),
-      { timeout: WEB_CAPTURE_TIMEOUT_MS }
-    );
-
-    await page.goto(searchUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: WEB_CAPTURE_TIMEOUT_MS,
-    });
-
-    const response = await responsePromise;
-    const json = await response.json();
-
-    const items = findTimelineItems(json);
-    const normalized = items.map(normalizeWebPost).filter(Boolean);
-    const deduped = dedupeWebPosts(normalized);
-    const sorted = sortWebPosts(deduped);
-
-    console.log(`Web raw posts for "${tag}": ${items.length}`);
-    console.log(`Web normalized posts for "${tag}": ${sorted.length}`);
-
-    return sorted;
-  } finally {
-    await browser.close();
-  }
-}
-
-async function logWebCaptureForTags(tags) {
-  console.log("Web capture enabled. Capturing Tumblr web timeline...");
-
-  for (const tag of tags) {
-    try {
-      console.log(`Capturing web timeline for tag: ${tag}`);
-      const posts = await captureWebTimelineForTag(tag);
-
-      console.log(`Web timeline posts for "${tag}" (${posts.length}):`);
-      console.log(JSON.stringify(posts, null, 2));
-    } catch (error) {
-      console.error(`Web capture failed for tag "${tag}":`, error.message);
-    }
   }
 }
 
@@ -313,10 +162,6 @@ async function main() {
   console.log("Tags:", TAGS);
   console.log("Last state:", state);
 
-  if (ENABLE_WEB_CAPTURE) {
-    await logWebCaptureForTags(TAGS);
-  }
-
   let allPosts = [];
 
   for (const tag of TAGS) {
@@ -338,17 +183,21 @@ async function main() {
 
   if (isFirstRun) {
     console.log("First run: initializing state without posting.");
+
     const lastPost = sortedPosts.at(-1);
 
     if (!lastPost) {
       console.log("No posts found. Saving empty initial state.");
-      saveState({ last_timestamp: 0, last_id: "0" });
+      saveState({
+        last_timestamp: 0,
+        last_id: "0"
+      });
       return;
     }
 
     saveState({
       last_timestamp: Number(lastPost.timestamp),
-      last_id: String(lastPost.id_string),
+      last_id: String(lastPost.id_string)
     });
 
     console.log(
@@ -374,7 +223,7 @@ async function main() {
   if (latestProcessedPost) {
     saveState({
       last_timestamp: Number(latestProcessedPost.timestamp),
-      last_id: String(latestProcessedPost.id_string),
+      last_id: String(latestProcessedPost.id_string)
     });
   } else {
     console.log("No new posts. State unchanged.");
