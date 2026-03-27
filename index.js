@@ -9,7 +9,7 @@ const TAGS = (process.env.TAGS || "")
   .filter(Boolean);
 
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
-const FRESHNESS_HOURS = Number(process.env.FRESHNESS_HOURS || 24);
+const FRESHNESS_HOURS = Number(process.env.FRESHNESS_HOURS || 48);
 const RECENT_IDS_LIMIT = Number(process.env.RECENT_IDS_LIMIT || 200);
 const STATE_FILE = "state.json";
 
