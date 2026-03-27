@@ -17,6 +17,8 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const FRESHNESS_HOURS = 48;
+
 function getFreshnessCutoffSeconds() {
   return Math.floor(Date.now() / 1000) - FRESHNESS_HOURS * 60 * 60;
 }
