@@ -7,6 +7,10 @@ const TAGS = (process.env.TAGS || "")
   .split(",")
   .map((tag) => tag.trim())
   .filter(Boolean);
+const EXCLUDED_TUMBLR_USERS = (process.env.EXCLUDED_TUMBLR_USERS || "")
+  .split(",")
+  .map((user) => user.trim().replace(/^@/, "").toLowerCase())
+  .filter(Boolean);
 
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
 const FRESHNESS_HOURS = 48;
@@ -95,6 +99,18 @@ function dedupePosts(posts) {
 
 function isFreshPost(post, cutoffSeconds) {
   return Number(post.timestamp || 0) >= cutoffSeconds;
+}
+
+function getPostBlogName(post) {
+  return String(post?.blog_name || "")
+    .trim()
+    .replace(/^@/, "")
+    .toLowerCase();
+}
+
+function isExcludedPost(post) {
+  const blogName = getPostBlogName(post);
+  return blogName ? EXCLUDED_TUMBLR_USERS.includes(blogName) : false;
 }
 
 async function fetchTagPosts(tag) {
@@ -200,6 +216,7 @@ async function main() {
 
   console.log("Starting run");
   console.log("Tags:", TAGS);
+  console.log("Excluded Tumblr users:", EXCLUDED_TUMBLR_USERS);
   console.log("Freshness hours:", FRESHNESS_HOURS);
   console.log("Freshness cutoff:", cutoffSeconds);
   console.log("Saved recent posts:", state.recent_posts.length);
@@ -217,6 +234,7 @@ async function main() {
   const freshPosts = dedupedPosts
     .filter((post) => isFreshPost(post, cutoffSeconds))
     .sort(comparePostOrderAsc);
+  const excludedFreshPosts = freshPosts.filter(isExcludedPost);
 
   const seenIds = buildSeenIdsSet(state, cutoffSeconds);
 
@@ -232,12 +250,15 @@ async function main() {
   }
 
   const postsToSend = freshPosts.filter(
-    (post) => !seenIds.has(String(post.id_string))
+    (post) =>
+      !seenIds.has(String(post.id_string)) &&
+      !isExcludedPost(post)
   );
 
   console.log("Total fetched:", allPosts.length);
   console.log("Deduped:", dedupedPosts.length);
   console.log("Fresh posts:", freshPosts.length);
+  console.log("Excluded fresh posts:", excludedFreshPosts.length);
   console.log("To send:", postsToSend.length);
 
   let sentCount = 0;
@@ -268,3 +289,4 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+
