@@ -7,7 +7,9 @@ const TAGS = (process.env.TAGS || "")
   .split(",")
   .map((tag) => tag.trim())
   .filter(Boolean);
-const EXCLUDED_TUMBLR_USERS = (process.env.EXCLUDED_TUMBLR_USERS || "")
+const EXCLUDED_TUMBLR_USERS = (
+  process.env.EXCLUDED_TUMBLR_USERS || process.env.EXCLUDED_TUMBLR_USER || ""
+)
   .split(",")
   .map((user) => user.trim().replace(/^@/, "").toLowerCase())
   .filter(Boolean);
