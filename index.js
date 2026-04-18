@@ -13,7 +13,7 @@ const EXCLUDED_TUMBLR_USERS = (process.env.EXCLUDED_TUMBLR_USERS || "")
   .filter(Boolean);
 
 const DELAY_MS = Number(process.env.DELAY_MS || 2000);
-const FRESHNESS_HOURS = 48;
+const FRESHNESS_HOURS = Number(process.env.FRESHNESS_HOURS || 48);
 const RECENT_IDS_LIMIT = Number(process.env.RECENT_IDS_LIMIT || 200);
 const STATE_FILE = "state.json";
 
@@ -289,4 +289,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
