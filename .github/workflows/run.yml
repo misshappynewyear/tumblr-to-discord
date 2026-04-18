@@ -40,6 +40,7 @@ jobs:
           TUMBLR_API_KEY: ${{ secrets.TUMBLR_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           TAGS: ${{ github.event.inputs.tags || vars.TAGS }}
+          EXCLUDED_TUMBLR_USERS: ${{ vars.EXCLUDED_TUMBLR_USERS }}
           DELAY_MS: ${{ github.event.inputs.delay_ms || vars.DELAY_MS || '2000' }}
           FRESHNESS_HOURS: "24"
           RECENT_IDS_LIMIT: "200"
