@@ -3,6 +3,7 @@ import fetch from "node-fetch";
 
 const API_KEY = process.env.TUMBLR_API_KEY;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
+const COBY_WEBHOOK_URL = process.env.COBY_WEBHOOK_URL;
 const TAGS = (process.env.TAGS || "")
   .split(",")
   .map((tag) => tag.trim())
@@ -18,6 +19,10 @@ const DELAY_MS = Number(process.env.DELAY_MS || 2000);
 const FRESHNESS_HOURS = Number(process.env.FRESHNESS_HOURS || 48);
 const RECENT_IDS_LIMIT = Number(process.env.RECENT_IDS_LIMIT || 200);
 const STATE_FILE = "state.json";
+const RUN_STATUS_FILE = "run_status.json";
+const GITHUB_RUN_ID = String(process.env.GITHUB_RUN_ID || "").trim();
+const GITHUB_RUN_ATTEMPT = Number(process.env.GITHUB_RUN_ATTEMPT || 0);
+const FAILURE_ALERT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,6 +72,29 @@ function saveState(state) {
     ),
     "utf8"
   );
+}
+
+function saveRunStatus(status) {
+  fs.writeFileSync(
+    RUN_STATUS_FILE,
+    JSON.stringify(status, null, 2),
+    "utf8"
+  );
+}
+
+function loadRunStatus() {
+  if (!fs.existsSync(RUN_STATUS_FILE)) {
+    return null;
+  }
+
+  try {
+    const raw = fs.readFileSync(RUN_STATUS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed ? parsed : null;
+  } catch (error) {
+    console.warn("Could not read run_status.json, using default run status.", error);
+    return null;
+  }
 }
 
 function comparePostOrderAsc(a, b) {
@@ -153,6 +181,96 @@ async function sendToDiscord(post) {
     const text = await response.text();
     throw new Error(`Discord webhook error: ${response.status} - ${text}`);
   }
+}
+
+async function sendCobyAlert(content) {
+  if (!COBY_WEBHOOK_URL) {
+    console.warn("Missing COBY_WEBHOOK_URL. Skipping Coby alert.");
+    return;
+  }
+
+  const response = await fetch(COBY_WEBHOOK_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      content,
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Coby webhook error: ${response.status} - ${text}`);
+  }
+}
+
+function buildTumblrContinuousFailureAlert(errorMessage, startedAtIso) {
+  const startedAt = String(startedAtIso || "").trim() || "an unknown time";
+  const safeError = String(errorMessage || "Unknown error").trim() || "Unknown error";
+
+  return [
+    "Captains! The Tumblr to Discord service has been failing for over 24 hours now...",
+    `It started failing around: ${startedAt}`,
+    "It says:",
+    `> ${safeError}`,
+    "Well... I don't really know what that means, Captain... but it doesn't look good.",
+    "You might want to check the workflow logs... because this doesn't feel like one of those errors that quietly fixes itself..."
+  ].join("\n");
+}
+
+function buildFailureRunStatus(previousRunStatus, error) {
+  const nowIso = new Date().toISOString();
+  const previousFailed = previousRunStatus?.success === false;
+  const failureStreakStartedAt = previousFailed && previousRunStatus?.failureStreakStartedAt
+    ? String(previousRunStatus.failureStreakStartedAt)
+    : nowIso;
+  const failureAlertedAt = previousFailed && previousRunStatus?.failureAlertedAt
+    ? String(previousRunStatus.failureAlertedAt)
+    : "";
+
+  return {
+    runId: GITHUB_RUN_ID,
+    runAttempt: GITHUB_RUN_ATTEMPT,
+    finishedAt: nowIso,
+    success: false,
+    postedSomething: false,
+    sentCount: 0,
+    tags: TAGS,
+    excludedUsers: EXCLUDED_TUMBLR_USERS,
+    freshnessHours: FRESHNESS_HOURS,
+    error: String(error?.message || error),
+    failureStreakStartedAt,
+    failureAlertedAt
+  };
+}
+
+async function maybeAlertContinuousFailure(runStatus) {
+  const startedAtValue = String(runStatus?.failureStreakStartedAt || "").trim();
+  const alertedAtValue = String(runStatus?.failureAlertedAt || "").trim();
+
+  if (!startedAtValue || alertedAtValue) {
+    return runStatus;
+  }
+
+  const startedAtMs = Date.parse(startedAtValue);
+  if (!Number.isFinite(startedAtMs)) {
+    return runStatus;
+  }
+
+  const durationMs = Date.now() - startedAtMs;
+  if (durationMs < FAILURE_ALERT_THRESHOLD_MS) {
+    return runStatus;
+  }
+
+  await sendCobyAlert(
+    buildTumblrContinuousFailureAlert(runStatus.error, runStatus.failureStreakStartedAt)
+  );
+
+  return {
+    ...runStatus,
+    failureAlertedAt: new Date().toISOString()
+  };
 }
 
 function buildSeenIdsSet(state, cutoffSeconds) {
@@ -283,11 +401,40 @@ async function main() {
   const nextState = buildNextState(state, freshPosts, cutoffSeconds);
   saveState(nextState);
 
+  saveRunStatus({
+    runId: GITHUB_RUN_ID,
+    runAttempt: GITHUB_RUN_ATTEMPT,
+    finishedAt: new Date().toISOString(),
+    success: true,
+    postedSomething: sentCount > 0,
+    sentCount,
+    totalFetched: allPosts.length,
+    dedupedCount: dedupedPosts.length,
+    freshCount: freshPosts.length,
+    excludedFreshCount: excludedFreshPosts.length,
+    tags: TAGS,
+    excludedUsers: EXCLUDED_TUMBLR_USERS,
+    freshnessHours: FRESHNESS_HOURS,
+    failureStreakStartedAt: "",
+    failureAlertedAt: ""
+  });
+
   console.log("Saved recent posts:", nextState.recent_posts.length);
   console.log(`Done. Sent: ${sentCount}`);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
+  const previousRunStatus = loadRunStatus();
+  const failedRunStatus = buildFailureRunStatus(previousRunStatus, error);
+
+  try {
+    const finalRunStatus = await maybeAlertContinuousFailure(failedRunStatus);
+    saveRunStatus(finalRunStatus);
+  } catch (alertError) {
+    console.error("Failed sending Tumblr continuous failure alert", alertError);
+    saveRunStatus(failedRunStatus);
+  }
+
   console.error(error);
   process.exit(1);
 });
