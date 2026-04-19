@@ -9,6 +9,10 @@ on:
       delay_ms:
         description: "Delay between Discord posts in milliseconds"
         required: false
+      force_run:
+        description: "Run even if the Tumblr service is disabled"
+        required: false
+        default: "false"
   schedule:
     - cron: "*/10 * * * *"
 
@@ -36,9 +40,11 @@ jobs:
         run: npm install
 
       - name: Run bot
+        if: ${{ vars.TUMBLR_TO_DISCORD_ENABLED != 'false' || github.event.inputs.force_run == 'true' }}
         env:
           TUMBLR_API_KEY: ${{ secrets.TUMBLR_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          COBY_WEBHOOK_URL: ${{ secrets.COBY_WEBHOOK_URL }}
           TAGS: ${{ github.event.inputs.tags || vars.TAGS }}
           EXCLUDED_TUMBLR_USERS: ${{ vars.EXCLUDED_TUMBLR_USERS || vars.EXCLUDED_TUMBLR_USER || secrets.EXCLUDED_TUMBLR_USERS || secrets.EXCLUDED_TUMBLR_USER || '' }}
           DELAY_MS: ${{ github.event.inputs.delay_ms || vars.DELAY_MS || '2000' }}
@@ -47,10 +53,11 @@ jobs:
         run: node index.js
 
       - name: Commit updated state
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add state.json
+          git add state.json run_status.json
           git diff --cached --quiet && exit 0
           git commit -m "Update bot state"
           git push
