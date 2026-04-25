@@ -1,12 +1,12 @@
 {
-  "runId": "24930279225",
+  "runId": "24931824530",
   "runAttempt": 1,
-  "finishedAt": "2026-04-25T11:52:56.043Z",
+  "finishedAt": "2026-04-25T13:19:37.845Z",
   "success": true,
   "postedSomething": false,
   "sentCount": 0,
-  "totalFetched": 111,
-  "dedupedCount": 105,
+  "totalFetched": 112,
+  "dedupedCount": 104,
   "freshCount": 1,
   "excludedFreshCount": 0,
   "tags": [
