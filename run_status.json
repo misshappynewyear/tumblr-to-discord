@@ -1,10 +1,14 @@
 {
-  "runId": "25578545098",
+  "runId": "25581041038",
   "runAttempt": 1,
-  "finishedAt": "2026-05-08T20:42:59.276Z",
-  "success": false,
-  "postedSomething": false,
-  "sentCount": 0,
+  "finishedAt": "2026-05-08T21:44:30.390Z",
+  "success": true,
+  "postedSomething": true,
+  "sentCount": 1,
+  "totalFetched": 112,
+  "dedupedCount": 103,
+  "freshCount": 2,
+  "excludedFreshCount": 0,
   "tags": [
     "zonami",
     "zoronami",
@@ -19,7 +23,6 @@
     "strangepersonflower"
   ],
   "freshnessHours": 24,
-  "error": "Discord webhook error: 429 - {\"message\": \"Service resource is being rate limited.\", \"retry_after\": 3, \"global\": false, \"code\": 40062}",
-  "failureStreakStartedAt": "2026-05-08T19:43:50.547Z",
+  "failureStreakStartedAt": "",
   "failureAlertedAt": ""
 }
