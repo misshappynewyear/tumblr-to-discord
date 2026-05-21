@@ -1,14 +1,10 @@
 {
-  "runId": "26197621617",
+  "runId": "26206108834",
   "runAttempt": 1,
-  "finishedAt": "2026-05-21T00:16:53.337Z",
-  "success": true,
+  "finishedAt": "2026-05-21T04:49:56.377Z",
+  "success": false,
   "postedSomething": false,
   "sentCount": 0,
-  "totalFetched": 112,
-  "dedupedCount": 103,
-  "freshCount": 1,
-  "excludedFreshCount": 0,
   "tags": [
     "zonami",
     "zoronami",
@@ -23,6 +19,7 @@
     "strangepersonflower"
   ],
   "freshnessHours": 24,
-  "failureStreakStartedAt": "",
+  "error": "Tumblr API error for tag \"zonami\": 429 - <html>\r\n<head><title>429 Too Many Requests</title></head>\r\n<body>\r\n<center><h1>429 Too Many Requests</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n",
+  "failureStreakStartedAt": "2026-05-21T04:49:56.377Z",
   "failureAlertedAt": ""
 }
