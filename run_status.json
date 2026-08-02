@@ -1,7 +1,7 @@
 {
-  "runId": "30722833325",
+  "runId": "30724910666",
   "runAttempt": 1,
-  "finishedAt": "2026-08-01T23:11:32.622Z",
+  "finishedAt": "2026-08-02T00:16:34.362Z",
   "success": false,
   "postedSomething": false,
   "sentCount": 0,
@@ -19,7 +19,7 @@
     "strangepersonflower"
   ],
   "freshnessHours": 24,
-  "error": "Tumblr API error for tag \"nami/zoro\": 429 - <html>\r\n<head><title>429 Too Many Requests</title></head>\r\n<body>\r\n<center><h1>429 Too Many Requests</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n",
+  "error": "Tumblr API error for tag \"ナミゾロ\": 429 - <html>\r\n<head><title>429 Too Many Requests</title></head>\r\n<body>\r\n<center><h1>429 Too Many Requests</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n",
   "failureStreakStartedAt": "2026-08-01T23:11:32.622Z",
   "failureAlertedAt": ""
 }
