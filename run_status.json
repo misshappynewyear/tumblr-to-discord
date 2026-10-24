@@ -1,13 +1,13 @@
 {
-  "runId": "40133316356",
+  "runId": "40142520383",
   "runAttempt": 1,
-  "finishedAt": "2026-10-24T21:14:29.336Z",
+  "finishedAt": "2026-10-24T23:23:21.444Z",
   "success": true,
-  "postedSomething": true,
-  "sentCount": 1,
+  "postedSomething": false,
+  "sentCount": 0,
   "totalFetched": 111,
   "dedupedCount": 103,
-  "freshCount": 1,
+  "freshCount": 0,
   "excludedFreshCount": 0,
   "tags": [
     "zonami",
